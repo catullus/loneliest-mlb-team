@@ -1,0 +1,144 @@
+---
+title: "The Loneliest MLB Team: a tale of two Bay Area cities"
+author: "Cody Flagg"
+date: "5/17/2022"
+output: github_document
+---
+
+A recent [New York Times article](https://www.nytimes.com/2022/05/15/sports/baseball/oakland-athletics-attendance.html) detailed why the Oakland Athletic's are America's "loneliest baseball team". 
+
+First we visualize attendance of the Oakland Athletics compared to the San Francisco Giants, a team that is roughly 15 miles across the bay. 
+
+Then, we see how the Oakland A's and the SF Giants compare to the rest of the MLB. 
+
+```{r message = FALSE, warning=FALSE, echo=FALSE}
+library(dplyr)
+library(ggplot2)
+library(ggblanket)
+library(baseballr)
+
+# whether to refresh data through API or just load local
+refresh = FALSE
+
+# get team_ids
+teams <- mlb_teams()
+
+
+
+if (refresh == TRUE){
+  
+    ## subset to Major League Baseball (this data set has a lot of Rookie and international leagues)
+  mlb_teams <- teams %>% filter(sport_name == 'Major League Baseball')
+
+  # pass team_ids to mlb_attendance
+  attendance <- lapply(X = mlb_teams$team_id, FUN = function(team_id){
+  
+      mlb_attendance(team_id = team_id)
+      
+  })
+
+  # stack each list element into a single data.frame
+  attendance2 <- do.call(rbind, attendance)
+  
+  # stash
+  output <- saveRDS(list(mlb_teams = mlb_teams, attendance = attendance, attendance2 = attendance2), file = 'team_attendance.rds')
+  
+} else {
+  
+input <- readRDS('team_attendance.rds')
+list2env(input, globalenv())
+  
+}
+
+
+
+# convert 4 digit year into usable date class
+attendance2 <- attendance2 %>% 
+    mutate(year_date = as.Date(ISOdate(year, 12, 31))) %>% 
+    # only keep teams in data.frame that exist in current year
+    # run two subqueries
+    # 1. filter to just current year (Sys.Date())
+    # 2. return team_names from just the current year
+    # 3. filter on the subquery (this does NOT have to be named)
+    filter(team_name %in% (subquery <- (attendance2 %>% 
+    filter(year == stringr::str_sub(Sys.Date(), 1, 4)) %>% 
+    pull(team_name)))) %>% 
+    # filter on years that the A's were around, to keep the charts smaller 
+    filter(year > (subquery2 <- (attendance2 %>% filter(team_name == 'Oakland Athletics') %>% arrange(year) %>% slice(1) %>% pull(year))))
+
+bay_teams <- c('Oakland Athletics', 'San Francisco Giants')
+
+point_size = 4
+line_size = 1
+
+colors = c(`Oakland Athletics` = '#003831', `San Francisco Giants` = '#FD5A1E')
+sizes = c(`Oakland Athletics` = 5, `San Francisco Giants`= 5)
+
+
+```
+
+# Bay Area Attendance
+
+* The `y-axis` displays the average __home game attendance__ per year. 
+
+```{r echo=FALSE}
+attendance2 %>% 
+    filter(team_name %in% c("San Francisco Giants", "Oakland Athletics")) %>% 
+    ggplot(aes(x = year_date,                                                           
+               y = attendance_average_home, 
+               col = team_name, 
+               group = team_name)) + 
+    geom_line(size=line_size) + 
+    geom_point(size=point_size) + 
+    scale_color_manual(values = colors) +
+    scale_size_manual(values = sizes) +
+    scale_x_date(date_breaks = "10 years",date_labels = "%Y") +
+    theme_minimal() +
+    # theme always have to go after theme_xxx()
+    theme(axis.text.x=element_text(angle=45, hjust=1))
+```
+
+# Oakland vs. the entire MLB
+
+* `NOTE` for simplicity's sake, we still only highlight the SF Giants and the Oakland A's. 
+* Notice how the A's _historically_ haven't had the lowest attendance (e.g. 2000 - 2007), however they have the lowest league attendance as of 2022. 
+
+```{r echo=FALSE}
+# methods for how to color a single line vs others is here
+## https://stackoverflow.com/questions/64167737/highlight-a-line-in-ggplot-with-multiple-lines
+
+attendance2 %>% 
+    ggplot(aes(x = year_date,                                                   
+               y = attendance_average_home, 
+               col = team_name, 
+               group = team_name)) + 
+    geom_line(aes(col = 'grey50', alpha = 0.2)) + 
+    scale_color_manual(values = colors) +
+    scale_size_manual(values = sizes) +
+    scale_x_date(date_breaks = "10 years",date_labels = "%Y") +
+    theme_minimal() +
+    # theme always have to go after theme_xxx()
+    theme(axis.text.x=element_text(angle=45, hjust=1)) + 
+    geom_point(data = attendance2 %>% filter(team_name %in% bay_teams), aes(x = year_date, y = attendance_average_home), size = 4) + 
+    geom_line(data = attendance2 %>% filter(team_name %in% bay_teams), aes(x = year_date, y = attendance_average_home), size = 1)
+```
+
+
+```{r eval=FALSE, echo=FALSE}
+
+attendance2 %>% 
+    ggplot(aes(x = year_date,                                                   
+               y = attendance_average_home, 
+               col = team_name, 
+               group = team_name)) + 
+    geom_line(aes(colour = team_name == c("Oakland Athletics", 'San Francisco Giants'), 
+                  size = team_name == c("Oakland Athletics", 'San Francisco Giants'), 
+                  group = team_name)) + 
+      scale_color_manual(name = "team_name", labels = c("Oakland Athletics", 'San Francisco Giants'), values = c("green", "red", )) +
+  scale_size_manual(name = "team_name", labels = c("Oakland Athletics", 'San Francisco Giants'), values = c(0.5, 2)) +
+  theme_bw()
+```
+
+### Next Steps
+
+* get number of seats per team's stadium, and scale average attendance to that e.g. `average_attendance / stadium_size`
